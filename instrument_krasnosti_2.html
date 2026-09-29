@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Инструмент красности</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+    background: #1c1c1e;
+    color: #f0f0f0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+    min-height: 100vh;
+  }
+  .title-box {
+    border: 2px solid #d92626;
+    border-radius: 10px;
+    padding: 8px 22px;
+    margin-bottom: 16px;
+  }
+  h1 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0;
+    color: #ff5555;
+    letter-spacing: .3px;
+  }
+  .toolbar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 14px;
+    max-width: 920px;
+  }
+  button, label.file-btn {
+    background: #2c2c2e;
+    border: 1px solid #444;
+    color: #f0f0f0;
+    padding: 8px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: background .15s;
+  }
+  button:hover, label.file-btn:hover { background: #3a3a3c; }
+  button.active { background: #cf2e2e; border-color: #cf2e2e; }
+  button.red { background: #cf2e2e; border-color: #cf2e2e; }
+  button.red:hover { background: #e33f3f; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  input[type="file"] { display: none; }
+  .slider-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: #ccc;
+  }
+  input[type="range"] { width: 100px; }
+  #zoomLabel { min-width: 42px; text-align: center; font-size: 13px; color: #ccc; }
+  #canvasWrap {
+    position: relative;
+    border: 1px solid #444;
+    border-radius: 10px;
+    overflow: hidden;
+    width: 100%;
+    max-width: 1300px;
+    height: 780px;
+    background:
+      linear-gradient(45deg, #2a2a2c 25%, transparent 25%),
+      linear-gradient(-45deg, #2a2a2c 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #2a2a2c 75%),
+      linear-gradient(-45deg, transparent 75%, #2a2a2c 75%);
+    background-size: 20px 20px;
+    background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+    background-color: #1c1c1e;
+    transition: border-color .15s;
+  }
+  #canvasWrap.dragover {
+    border-color: #ff5555;
+    border-width: 2px;
+  }
+  canvas {
+    display: block;
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform-origin: 0 0;
+    will-change: transform;
+    cursor: crosshair;
+  }
+  #overlayCanvas {
+    pointer-events: none;
+  }
+  .hint {
+    font-size: 12px;
+    color: #999;
+    margin-top: 10px;
+    max-width: 720px;
+    text-align: center;
+    line-height: 1.5;
+  }
+  #dropOverlay {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(217, 38, 38, 0.15);
+    color: #ff8080;
+    font-size: 16px;
+    font-weight: 500;
+    pointer-events: none;
+    z-index: 5;
+  }
+  #canvasWrap.dragover #dropOverlay { display: flex; }
+</style>
+</head>
+<body>
+
+<div class="title-box"><h1>Инструмент красности</h1></div>
+
+<div class="toolbar">
+  <label class="file-btn">
+    Загрузить фото
+    <input type="file" id="fileInput" accept="image/*">
+  </label>
+  <button id="penBtn">Перо</button>
+  <button id="closeBtn" disabled>Замкнуть контур</button>
+  <button id="undoPointBtn" disabled>Отменить точку</button>
+  <button id="clearSelBtn" disabled>Сбросить выделение</button>
+  <div class="slider-wrap">
+    <button id="zoomOutBtn">−</button>
+    <span id="zoomLabel">100%</span>
+    <button id="zoomInBtn">+</button>
+  </div>
+  <button id="addRedBtn" class="red" disabled>Добавить красности</button>
+  <button id="resetAllBtn">Сбросить всё</button>
+  <button id="downloadBtn" disabled>Скачать</button>
+</div>
+
+<div id="canvasWrap">
+  <div id="dropOverlay">Отпустите фото сюда</div>
+  <canvas id="canvas" width="1200" height="800"></canvas>
+  <canvas id="overlayCanvas" width="1200" height="800"></canvas>
+</div>
+
+<p class="hint">
+  1. Загрузите фото кнопкой или просто перетащите файл на холст.<br>
+  2. Приблизьте изображение зумом для точности, нажмите «Перо» и кликайте по холсту — ставите точки контура.<br>
+  3. Точки можно перетаскивать мышью в любой момент, даже после замыкания контура.<br>
+  4. Замкните контур (кнопкой или кликом рядом с первой жёлтой точкой), настройте силу и нажмите «Добавить красности».
+</p>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const overlayCanvas = document.getElementById('overlayCanvas');
+const octx = overlayCanvas.getContext('2d');
+const canvasWrap = document.getElementById('canvasWrap');
+const fileInput = document.getElementById('fileInput');
+const penBtn = document.getElementById('penBtn');
+const closeBtn = document.getElementById('closeBtn');
+const undoPointBtn = document.getElementById('undoPointBtn');
+const clearSelBtn = document.getElementById('clearSelBtn');
+const addRedBtn = document.getElementById('addRedBtn');
+const resetAllBtn = document.getElementById('resetAllBtn');
+const downloadBtn = document.getElementById('downloadBtn');
+const zoomInBtn = document.getElementById('zoomInBtn');
+const zoomOutBtn = document.getElementById('zoomOutBtn');
+const zoomLabel = document.getElementById('zoomLabel');
+
+let baseImage = new Image();
+let hasImage = false;
+let penActive = false;
+let points = [];
+let closed = false;
+let zoom = 1;
+let panX = 0, panY = 0;
+let draggingIndex = -1;
+let mouseDownOnPoint = false;
+let panCandidate = false;
+let isPanning = false;
+let panStartX = 0, panStartY = 0, panStartPanX = 0, panStartPanY = 0;
+let wasPanning = false;
+
+const POINT_HIT_RADIUS = 10;
+
+function applyTransform() {
+  const t = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+  canvas.style.transform = t;
+  overlayCanvas.style.transform = t;
+  zoomLabel.textContent = Math.round(zoom * 100) + '%';
+}
+
+function centerCanvas() {
+  const wrapRect = canvasWrap.getBoundingClientRect();
+  zoom = 1;
+  panX = (wrapRect.width - canvas.width) / 2;
+  panY = (wrapRect.height - canvas.height) / 2;
+  applyTransform();
+}
+
+function zoomBy(factor, centerXInWrap, centerYInWrap) {
+  const worldX = (centerXInWrap - panX) / zoom;
+  const worldY = (centerYInWrap - panY) / zoom;
+  zoom = Math.min(4, Math.max(0.25, zoom * factor));
+  panX = centerXInWrap - worldX * zoom;
+  panY = centerYInWrap - worldY * zoom;
+  applyTransform();
+}
+
+zoomInBtn.addEventListener('click', () => {
+  const wrapRect = canvasWrap.getBoundingClientRect();
+  zoomBy(1.25, wrapRect.width / 2, wrapRect.height / 2);
+});
+zoomOutBtn.addEventListener('click', () => {
+  const wrapRect = canvasWrap.getBoundingClientRect();
+  zoomBy(1 / 1.25, wrapRect.width / 2, wrapRect.height / 2);
+});
+
+canvasWrap.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const wrapRect = canvasWrap.getBoundingClientRect();
+  const mouseX = e.clientX - wrapRect.left;
+  const mouseY = e.clientY - wrapRect.top;
+  const factor = Math.exp(-e.deltaY * 0.0012);
+  zoomBy(factor, mouseX, mouseY);
+  if (panCandidate || isPanning) {
+    panStartX = e.clientX;
+    panStartY = e.clientY;
+    panStartPanX = panX;
+    panStartPanY = panY;
+  }
+}, { passive: false });
+
+function drawBase() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (hasImage) {
+    ctx.drawImage(baseImage, 0, 0, canvas.width, canvas.height);
+  }
+}
+
+function redrawOverlay() {
+  octx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+  drawPath();
+}
+
+function drawPath() {
+  if (points.length === 0) return;
+  octx.save();
+  octx.beginPath();
+  octx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) {
+    octx.lineTo(points[i].x, points[i].y);
+  }
+  if (closed) octx.closePath();
+  octx.strokeStyle = '#ff5555';
+  octx.lineWidth = 2;
+  octx.setLineDash(closed ? [] : [5, 4]);
+  octx.stroke();
+  octx.setLineDash([]);
+
+  points.forEach((p, i) => {
+    octx.beginPath();
+    octx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+    octx.fillStyle = i === 0 ? '#ffcc00' : '#ff5555';
+    octx.fill();
+    octx.lineWidth = 1;
+    octx.strokeStyle = '#000';
+    octx.stroke();
+  });
+  octx.restore();
+}
+
+function getPos(e) {
+  const wrapRect = canvasWrap.getBoundingClientRect();
+  return {
+    x: (e.clientX - wrapRect.left - panX) / zoom,
+    y: (e.clientY - wrapRect.top - panY) / zoom
+  };
+}
+
+function findPointNear(pos) {
+  for (let i = 0; i < points.length; i++) {
+    const d = Math.hypot(points[i].x - pos.x, points[i].y - pos.y);
+    if (d <= POINT_HIT_RADIUS) return i;
+  }
+  return -1;
+}
+
+canvas.addEventListener('mousedown', (e) => {
+  const pos = getPos(e);
+  const idx = findPointNear(pos);
+  if (idx !== -1) {
+    draggingIndex = idx;
+    mouseDownOnPoint = true;
+    e.preventDefault();
+  } else {
+    mouseDownOnPoint = false;
+    panCandidate = true;
+    isPanning = false;
+    panStartX = e.clientX;
+    panStartY = e.clientY;
+    panStartPanX = panX;
+    panStartPanY = panY;
+  }
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  if (draggingIndex !== -1) {
+    points[draggingIndex] = getPos(e);
+    redrawOverlay();
+    return;
+  }
+  if (panCandidate) {
+    const dx = e.clientX - panStartX;
+    const dy = e.clientY - panStartY;
+    if (!isPanning && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
+      isPanning = true;
+      canvas.style.cursor = 'grabbing';
+    }
+    if (isPanning) {
+      panX = panStartPanX + dx;
+      panY = panStartPanY + dy;
+      applyTransform();
+    }
+  }
+});
+
+window.addEventListener('mouseup', () => {
+  draggingIndex = -1;
+  if (isPanning) {
+    wasPanning = true;
+    canvas.style.cursor = 'crosshair';
+  }
+  panCandidate = false;
+  isPanning = false;
+});
+
+canvas.addEventListener('click', (e) => {
+  if (mouseDownOnPoint) { mouseDownOnPoint = false; return; }
+  if (wasPanning) { wasPanning = false; return; }
+  if (!penActive || closed) return;
+  const pos = getPos(e);
+
+  if (points.length > 2) {
+    const first = points[0];
+    const dist = Math.hypot(pos.x - first.x, pos.y - first.y);
+    if (dist < 10) {
+      closePath();
+      return;
+    }
+  }
+
+  points.push(pos);
+  updateButtons();
+  redrawOverlay();
+});
+
+function closePath() {
+  if (points.length < 3) return;
+  closed = true;
+  penActive = false;
+  penBtn.classList.remove('active');
+  updateButtons();
+  redrawOverlay();
+}
+
+function updateButtons() {
+  closeBtn.disabled = points.length < 3 || closed;
+  undoPointBtn.disabled = points.length === 0 || closed;
+  clearSelBtn.disabled = points.length === 0;
+  addRedBtn.disabled = !closed;
+}
+
+penBtn.addEventListener('click', () => {
+  if (closed) return;
+  penActive = !penActive;
+  penBtn.classList.toggle('active', penActive);
+});
+
+closeBtn.addEventListener('click', closePath);
+
+undoPointBtn.addEventListener('click', () => {
+  if (closed) return;
+  points.pop();
+  updateButtons();
+  redrawOverlay();
+});
+
+clearSelBtn.addEventListener('click', () => {
+  points = [];
+  closed = false;
+  penActive = false;
+  penBtn.classList.remove('active');
+  updateButtons();
+  redrawOverlay();
+});
+
+addRedBtn.addEventListener('click', () => {
+  if (!closed || points.length < 3) return;
+
+  const strength = 0.6;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) {
+    ctx.lineTo(points[i].x, points[i].y);
+  }
+  ctx.closePath();
+  ctx.clip();
+
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = `rgba(210, 25, 25, ${strength})`;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.globalCompositeOperation = 'source-over';
+
+  ctx.restore();
+
+  points = [];
+  closed = false;
+  updateButtons();
+  redrawOverlay();
+
+  downloadBtn.disabled = false;
+});
+
+resetAllBtn.addEventListener('click', () => {
+  hasImage = false;
+  points = [];
+  closed = false;
+  penActive = false;
+  penBtn.classList.remove('active');
+  fileInput.value = '';
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  octx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+  centerCanvas();
+  updateButtons();
+  downloadBtn.disabled = true;
+});
+
+downloadBtn.addEventListener('click', () => {
+  const link = document.createElement('a');
+  link.download = 'krasnost.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+});
+
+function loadImageFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    baseImage = new Image();
+    baseImage.onload = () => {
+      const maxW = 1200, maxH = 800;
+      let w = baseImage.width, h = baseImage.height;
+      const ratio = Math.min(maxW / w, maxH / h, 1);
+      w = Math.round(w * ratio);
+      h = Math.round(h * ratio);
+      canvas.width = w;
+      canvas.height = h;
+      overlayCanvas.width = w;
+      overlayCanvas.height = h;
+      hasImage = true;
+      points = [];
+      closed = false;
+      centerCanvas();
+      updateButtons();
+      drawBase();
+      octx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+      downloadBtn.disabled = false;
+    };
+    baseImage.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+fileInput.addEventListener('change', (e) => {
+  loadImageFile(e.target.files[0]);
+});
+
+['dragenter', 'dragover'].forEach(evt => {
+  canvasWrap.addEventListener(evt, (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    canvasWrap.classList.add('dragover');
+  });
+});
+['dragleave', 'drop'].forEach(evt => {
+  canvasWrap.addEventListener(evt, (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (evt === 'dragleave' && e.target !== canvasWrap) return;
+    canvasWrap.classList.remove('dragover');
+  });
+});
+canvasWrap.addEventListener('drop', (e) => {
+  const file = e.dataTransfer.files[0];
+  loadImageFile(file);
+});
+document.addEventListener('dragover', (e) => e.preventDefault());
+document.addEventListener('drop', (e) => e.preventDefault());
+
+centerCanvas();
+updateButtons();
+</script>
+
+</body>
+</html>
